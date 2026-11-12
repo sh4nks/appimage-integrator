@@ -1,0 +1,10 @@
+[Unit]
+Description=Integrate AppImages in the watched directories into the desktop
+
+[Service]
+ExecStart=/usr/bin/appimage-integrator watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

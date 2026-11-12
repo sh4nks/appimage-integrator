@@ -1,0 +1,9 @@
+# Copy to ~/.config/appimage-integrator/config.toml
+# Paths must be absolute or start with ~/
+
+# Where the integrate command moves AppImages to.
+appimage_dir = "~/Applications"
+
+# Directories covered by the sync and watch commands. AppImages found here are
+# integrated where they are and never moved. Defaults to appimage_dir only.
+watch_dirs = ["~/Applications", "~/Games/AppImages"]
