@@ -1,0 +1,6 @@
+[Unit]
+Description=Check integrated AppImages for updates
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/appimage-integrator update --check --notify

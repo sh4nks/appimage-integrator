@@ -1,3 +1,6 @@
+#[cfg(feature = "update")]
+mod update;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -34,6 +37,22 @@ enum Command {
         #[arg(long)]
         keep_file: bool,
     },
+    /// Check for and install updates using the update information embedded in AppImages
+    #[cfg(feature = "update")]
+    Update {
+        /// Id as shown by the list command
+        #[arg(required_unless_present_any = ["all", "check"], conflicts_with = "all")]
+        id: Option<String>,
+        /// Cover every integrated AppImage
+        #[arg(long)]
+        all: bool,
+        /// Only report whether updates are available
+        #[arg(long)]
+        check: bool,
+        /// Send a desktop notification when updates are available
+        #[arg(long, requires = "check")]
+        notify: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -59,6 +78,10 @@ fn main() -> ExitCode {
             let result = remove_command(&id, &dirs, keep_file);
             (id, result)
         }
+        #[cfg(feature = "update")]
+        Command::Update { id, check, notify, .. } => {
+            ("update".to_string(), update::command(id.as_deref(), check, notify, &dirs))
+        }
     };
     if let Err(error) = result {
         eprintln!("{subject}: {error}");
@@ -81,6 +104,7 @@ fn info(file: &Path) -> Result<(), Error> {
         ),
         None => println!("Icon:     -"),
     }
+    println!("Update:   {}", info.update_info.as_deref().unwrap_or("-"));
     Ok(())
 }
 

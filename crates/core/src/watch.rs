@@ -7,6 +7,8 @@ use inotify::{EventMask, Inotify, WatchMask};
 use crate::integrate::integrate_in_place;
 use crate::{Dirs, Error, Integrated, appimage_type, list, remove};
 
+const PARTIAL_DOWNLOAD_SUFFIXES: [&str; 3] = [".zsync-tmp", ".part", ".crdownload"];
+
 #[derive(Debug)]
 pub enum Change {
     Integrated(Integrated),
@@ -88,7 +90,10 @@ fn watched_dirs(dirs: &Dirs) -> io::Result<Vec<PathBuf>> {
 }
 
 fn integrate_new(file: &Path, dirs: &Dirs, report: &mut dyn FnMut(Change)) -> Result<(), Error> {
-    if !matches!(appimage_type(file), Ok(Some(_)))
+    let name = file.file_name().unwrap().to_string_lossy();
+    if name.starts_with('.')
+        || PARTIAL_DOWNLOAD_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+        || !matches!(appimage_type(file), Ok(Some(_)))
         || list(dirs)?.iter().any(|item| item.appimage == file)
     {
         return Ok(());

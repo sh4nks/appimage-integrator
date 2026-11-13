@@ -4,18 +4,32 @@ use std::path::Path;
 
 use appimage_integrator_core::{AppImageType, Error, appimage_type, inspect};
 use backhand::NodeHeader;
-use common::{DESKTOP_ENTRY, PNG, appimage, elf_header, push_file, write_fixture};
+use common::{DESKTOP_ENTRY, PNG, appimage, appimage_bytes, push_file, runtime, write_fixture};
 
 #[test]
 fn detects_types() {
-    let type1 = write_fixture("type1", &elf_header(b"AI\x01"));
-    let type2 = write_fixture("type2", &elf_header(b"AI\x02"));
-    let plain_elf = write_fixture("elf", &elf_header(b"\0\0\0"));
+    let type1 = write_fixture("type1", &runtime(b"AI\x01", ""));
+    let type2 = write_fixture("type2", &runtime(b"AI\x02", ""));
+    let plain_elf = write_fixture("elf", &runtime(b"\0\0\0", ""));
     let short = write_fixture("short", b"\x7fELF");
     assert_eq!(appimage_type(&type1).unwrap(), Some(AppImageType::Type1));
     assert_eq!(appimage_type(&type2).unwrap(), Some(AppImageType::Type2));
     assert_eq!(appimage_type(&plain_elf).unwrap(), None);
     assert_eq!(appimage_type(&short).unwrap(), None);
+}
+
+#[test]
+fn reads_embedded_update_information() {
+    let with_info = appimage_bytes("gh-releases-zsync|owner|repo|latest|App-*.AppImage.zsync", |squashfs| {
+        push_file(squashfs, "example.desktop", DESKTOP_ENTRY.as_bytes());
+    });
+    let info = inspect(&write_fixture("update-info", &with_info)).unwrap();
+    assert_eq!(info.update_info.as_deref(), Some("gh-releases-zsync|owner|repo|latest|App-*.AppImage.zsync"));
+
+    let without_info = appimage("no-update-info", |squashfs| {
+        push_file(squashfs, "example.desktop", DESKTOP_ENTRY.as_bytes());
+    });
+    assert_eq!(inspect(&without_info).unwrap().update_info, None);
 }
 
 #[test]
@@ -103,9 +117,9 @@ fn rejects_symlink_loops() {
 
 #[test]
 fn rejects_unsupported_inputs() {
-    let type1 = write_fixture("inspect-type1", &elf_header(b"AI\x01"));
-    let no_payload = write_fixture("inspect-no-payload", &elf_header(b"AI\x02"));
-    let plain_elf = write_fixture("inspect-elf", &elf_header(b"\0\0\0"));
+    let type1 = write_fixture("inspect-type1", &runtime(b"AI\x01", ""));
+    let no_payload = write_fixture("inspect-no-payload", &runtime(b"AI\x02", ""));
+    let plain_elf = write_fixture("inspect-elf", &runtime(b"\0\0\0", ""));
     assert!(matches!(inspect(&type1), Err(Error::UnsupportedType1)));
     assert!(matches!(inspect(&no_payload), Err(Error::UnsupportedPayload)));
     assert!(matches!(inspect(&plain_elf), Err(Error::NotAppImage)));

@@ -1,6 +1,9 @@
 mod config;
 mod desktop;
+mod elf;
 mod integrate;
+#[cfg(feature = "update")]
+pub mod update;
 mod watch;
 
 pub use config::Dirs;
@@ -16,6 +19,7 @@ use backhand::{BackhandError, FilesystemReader, InnerNode, SquashfsFileReader};
 
 const MAX_DESKTOP_ENTRY_SIZE: u64 = 1 << 20;
 const MAX_ICON_SIZE: u64 = 16 << 20;
+const MAX_UPDATE_INFO_SIZE: u64 = 4096;
 const MAX_SYMLINK_DEPTH: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +43,9 @@ pub enum Error {
     WatchedDirGone(PathBuf),
     NoHomeDir,
     Config(PathBuf, String),
+    NoUpdateInfo,
+    UnsupportedUpdateInfo(String),
+    Update(String),
 }
 
 impl fmt::Display for Error {
@@ -59,6 +66,9 @@ impl fmt::Display for Error {
             Error::WatchedDirGone(path) => write!(f, "{} was moved or deleted", path.display()),
             Error::NoHomeDir => write!(f, "cannot determine the home directory"),
             Error::Config(path, message) => write!(f, "{}: {message}", path.display()),
+            Error::NoUpdateInfo => write!(f, "no update information embedded"),
+            Error::UnsupportedUpdateInfo(info) => write!(f, "unsupported update information: {info}"),
+            Error::Update(message) => write!(f, "{message}"),
         }
     }
 }
@@ -89,6 +99,7 @@ pub struct AppImageInfo {
     pub desktop_file: String,
     pub desktop_entry: String,
     pub icon: Option<Icon>,
+    pub update_info: Option<String>,
 }
 
 impl AppImageInfo {
@@ -106,19 +117,20 @@ impl AppImageInfo {
 }
 
 pub fn appimage_type(path: &Path) -> io::Result<Option<AppImageType>> {
-    let header = read_header(&mut File::open(path)?)?;
+    let header = elf::read_header(&mut File::open(path)?)?;
     Ok(header.as_ref().and_then(type_from_header))
 }
 
 pub fn inspect(path: &Path) -> Result<AppImageInfo, Error> {
     let mut file = File::open(path)?;
-    let header = read_header(&mut file)?.ok_or(Error::NotAppImage)?;
+    let header = elf::read_header(&mut file)?.ok_or(Error::NotAppImage)?;
     match type_from_header(&header).ok_or(Error::NotAppImage)? {
         AppImageType::Type1 => return Err(Error::UnsupportedType1),
         AppImageType::Type2 => {}
     }
+    let update_info = read_update_info(&mut file, &header);
 
-    let offset = payload_offset(&header);
+    let offset = elf::payload_offset(&header);
     let mut magic = [0u8; 4];
     file.seek(SeekFrom::Start(offset))?;
     if file.read_exact(&mut magic).is_err() || &magic != b"hsqs" {
@@ -145,19 +157,11 @@ pub fn inspect(path: &Path) -> Result<AppImageInfo, Error> {
         desktop_file: desktop_path.file_name().unwrap().to_string_lossy().into_owned(),
         desktop_entry,
         icon,
+        update_info,
     })
 }
 
-fn read_header(file: &mut File) -> io::Result<Option<[u8; 64]>> {
-    let mut header = [0u8; 64];
-    match file.read_exact(&mut header) {
-        Ok(()) => Ok(Some(header)),
-        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
-        Err(error) => Err(error),
-    }
-}
-
-fn type_from_header(header: &[u8; 64]) -> Option<AppImageType> {
+fn type_from_header(header: &elf::Header) -> Option<AppImageType> {
     if &header[..4] != b"\x7fELF" {
         return None;
     }
@@ -168,16 +172,11 @@ fn type_from_header(header: &[u8; 64]) -> Option<AppImageType> {
     }
 }
 
-// The payload starts where the ELF runtime ends: section header offset plus the size of the section header table.
-fn payload_offset(header: &[u8; 64]) -> u64 {
-    let u16_at = |i: usize| u64::from(u16::from_le_bytes([header[i], header[i + 1]]));
-    if header[4] == 1 {
-        let table = u64::from(u32::from_le_bytes(header[0x20..0x24].try_into().unwrap()));
-        table + u16_at(0x2E) * u16_at(0x30)
-    } else {
-        let table = u64::from_le_bytes(header[0x28..0x30].try_into().unwrap());
-        table.saturating_add(u16_at(0x3A) * u16_at(0x3C))
-    }
+fn read_update_info(file: &mut File, header: &elf::Header) -> Option<String> {
+    let section = elf::section(file, header, ".upd_info", MAX_UPDATE_INFO_SIZE).ok()??;
+    let text = section.split(|byte| *byte == 0).next().unwrap();
+    let text = String::from_utf8_lossy(text).trim().to_string();
+    (!text.is_empty()).then_some(text)
 }
 
 fn find_icon(fs: &FilesystemReader, name: Option<&str>) -> Result<Option<Icon>, Error> {

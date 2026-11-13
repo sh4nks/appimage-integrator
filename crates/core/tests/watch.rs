@@ -15,6 +15,8 @@ fn sync_integrates_new_files_and_drops_entries_for_deleted_ones() {
     let appimage = dirs.appimages.join("Example.AppImage");
     fs::rename(example("sync.AppImage"), &appimage).unwrap();
     fs::write(dirs.appimages.join("notes.txt"), "not an AppImage").unwrap();
+    fs::copy(&appimage, dirs.appimages.join("Other.AppImage.part")).unwrap();
+    fs::copy(&appimage, dirs.appimages.join(".hidden.AppImage")).unwrap();
     fs::create_dir(dirs.appimages.join("folder")).unwrap();
 
     let mut changes = Vec::new();

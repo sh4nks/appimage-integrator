@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AppImage Integrator
+Comment=Integrate, run and update AppImages
+Exec=appimage-integrator-gui %f
+Icon=application-vnd.appimage
+Terminal=false
+Categories=Utility;
+MimeType=application/vnd.appimage;application/x-iso9660-appimage;

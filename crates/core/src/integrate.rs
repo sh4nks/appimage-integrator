@@ -16,20 +16,41 @@ pub struct Integrated {
 }
 
 pub fn integrate(file: &Path, dirs: &Dirs) -> Result<Integrated, Error> {
-    integrate_into(file, Some(&dirs.appimages), dirs)
+    integrate_into(file, Some(&dirs.appimages), dirs, None)
 }
 
 pub(crate) fn integrate_in_place(file: &Path, dirs: &Dirs) -> Result<Integrated, Error> {
-    integrate_into(file, None, dirs)
+    integrate_into(file, None, dirs, None)
 }
 
-fn integrate_into(file: &Path, destination: Option<&Path>, dirs: &Dirs) -> Result<Integrated, Error> {
+#[cfg(feature = "update")]
+pub(crate) fn replace_integration(old: &Integrated, file: &Path, dirs: &Dirs) -> Result<Integrated, Error> {
+    let new = integrate_into(file, None, dirs, Some(&old.id))?;
+    if new.id != old.id {
+        fs::remove_file(&old.desktop_file)?;
+    }
+    if old.icon != new.icon
+        && let Some(icon) = &old.icon
+    {
+        remove_if_present(icon)?;
+    }
+    Ok(new)
+}
+
+fn integrate_into(
+    file: &Path,
+    destination: Option<&Path>,
+    dirs: &Dirs,
+    replacing: Option<&str>,
+) -> Result<Integrated, Error> {
     let info = inspect(file)?;
     let desktop_file = dirs.desktop_entries.join(&info.desktop_file);
     let id = entry_id(&desktop_file);
     match fs::read_to_string(&desktop_file) {
         Ok(existing) if parse(&desktop_file, &existing, dirs).is_some() => {
-            return Err(Error::AlreadyIntegrated(id));
+            if replacing != Some(id.as_str()) {
+                return Err(Error::AlreadyIntegrated(id));
+            }
         }
         Ok(_) => return Err(Error::DesktopEntryConflict(desktop_file)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
