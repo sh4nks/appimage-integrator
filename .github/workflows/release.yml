@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        runner: [ubuntu-26.04, ubuntu-26.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check that the tag matches the Cargo version
+        run: test "v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" = "$GITHUB_REF_NAME"
+      - name: Install the musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          rustup target add "$(uname -m)-unknown-linux-musl"
+      - run: cargo test --locked
+      - run: dist/build-static.sh
+        env:
+          TARGET_CC: musl-gcc
+      - name: Package
+        run: |
+          arch="$(uname -m)"
+          name="appimage-integrator-${GITHUB_REF_NAME#v}-$arch-linux"
+          mkdir "$name"
+          cp "target/$arch-unknown-linux-musl/release/appimage-integrator" LICENSE \
+            dist/*.service dist/*.timer dist/config.example.toml "$name"
+          "$name/appimage-integrator" --help > /dev/null
+          tar -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.runner }}
+          path: "*.tar.gz"
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+      - run: sha256sum *.tar.gz > SHA256SUMS
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes *.tar.gz SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}

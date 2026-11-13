@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  cli:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup component add clippy
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - name: Build without the updater
+        run: cargo build --locked --no-default-features -p appimage-integrator
+
+  gui:
+    runs-on: ubuntu-26.04
+    container: archlinux:base-devel
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - run: pacman -Syu --noconfirm rust qt6-base qt6-declarative
+      - uses: actions/checkout@v7
+      - run: cargo clippy --locked --all-targets -p appimage-integrator-gui -- -D warnings
+      - run: cargo test --locked -p appimage-integrator-gui
+      - run: cargo build --locked -p appimage-integrator-gui
