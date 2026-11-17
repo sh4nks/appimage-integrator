@@ -1,5 +1,5 @@
 pkgname=appimage-integrator-git
-pkgver=0.1.0.r1.g7b7964d
+pkgver=0.1.0.r4.gbdcf976
 pkgrel=1
 pkgdesc="Integrate AppImages into the desktop (command line tool, folder watcher and Qt window)"
 arch=(x86_64 aarch64)
@@ -14,6 +14,7 @@ optdepends=(
 provides=(appimage-integrator appimage-integrator-cli)
 conflicts=(appimage-integrator appimage-integrator-cli)
 options=(!lto !debug)
+install=$pkgname.install
 source=("$pkgname::git+$url.git")
 sha256sums=(SKIP)
 

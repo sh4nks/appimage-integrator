@@ -1,0 +1,15 @@
+post_install() {
+  cat <<'EOF'
+==> Right-click an AppImage in the file manager and choose
+    Open With -> AppImage Integrator.
+==> Or open "AppImage Integrator" from the launcher, or add a single AppImage from a terminal:
+      appimage-integrator integrate /path/to/App.AppImage
+==> Integrate AppImages automatically when they are dropped into ~/Applications:
+      systemctl --user enable --now appimage-integrator.service
+==> Check for AppImage updates once a day (notifications need libnotify):
+      systemctl --user enable --now appimage-integrator-update.timer
+==> To use other directories, copy
+      /usr/share/doc/appimage-integrator/config.example.toml
+    to ~/.config/appimage-integrator/config.toml and edit it.
+EOF
+}

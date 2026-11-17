@@ -20,6 +20,7 @@ cargo build --release -p appimage-integrator-gui  # GUI, needs Qt 6
 
 ```sh
 appimage-integrator integrate Foo.AppImage  # move to ~/Applications and add to the launcher
+appimage-integrator integrate --replace Foo.AppImage  # same, and take the place of an integrated version of the app
 appimage-integrator list
 appimage-integrator remove <id>             # --keep-file leaves the AppImage in place
 appimage-integrator sync                    # integrate new, drop deleted

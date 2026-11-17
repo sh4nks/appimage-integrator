@@ -57,7 +57,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use appimage_integrator_core::{Dirs, Integrated, inspect, integrate, list, remove};
+use appimage_integrator_core::{Dirs, Integrated, inspect, integrate, list, remove, replace};
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
 use serde_json::json;
@@ -77,6 +77,7 @@ pub struct BackendRust {
     updatable: bool,
     dirs: Option<Dirs>,
     pending_file: Option<PathBuf>,
+    pending_replaces: bool,
     update_states: HashMap<String, UpdateState>,
 }
 
@@ -148,17 +149,20 @@ impl qobject::Backend {
         let (Some(file), Some(dirs)) = (self.rust().pending_file.clone(), self.rust().dirs.clone()) else {
             return false;
         };
-        let integrated = match integrate(&file, &dirs) {
+        let replaces = self.rust().pending_replaces;
+        let result = if replaces { replace(&file, &dirs) } else { integrate(&file, &dirs) };
+        let integrated = match result {
             Ok(integrated) => integrated,
             Err(error) => {
                 self.show_status(error);
                 return false;
             }
         };
+        let done = if replaces { "Replaced" } else { "Integrated" };
         if run && let Err(error) = run_appimage(&integrated.appimage) {
-            self.as_mut().show_status(format!("Integrated, but cannot start it: {error}"));
+            self.as_mut().show_status(format!("{done}, but cannot start it: {error}"));
         } else {
-            self.as_mut().show_status(format!("Integrated {}", integrated.name.as_deref().unwrap_or(&integrated.id)));
+            self.as_mut().show_status(format!("{done} {}", integrated.name.as_deref().unwrap_or(&integrated.id)));
         }
         self.as_mut().rust_mut().pending_file = None;
         self.as_mut().set_pending(QString::default());
@@ -187,31 +191,43 @@ impl qobject::Backend {
 
     fn open_file(mut self: Pin<&mut Self>, file: PathBuf) {
         let file = fs::canonicalize(&file).unwrap_or(file);
-        let integrated = self.as_mut().items().unwrap_or_default().into_iter().any(|item| item.appimage == file);
-        if integrated {
+        let items = self.as_mut().items().unwrap_or_default();
+        if items.iter().any(|item| item.appimage == file) {
             match run_appimage(&file) {
                 Ok(()) => std::process::exit(0),
                 Err(error) => return self.show_status(format!("Cannot start {}: {error}", file.display())),
             }
         }
         let filename = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let mut replaces = false;
         let pending = match inspect(&file) {
-            Ok(info) => json!({
-                "file": file.to_string_lossy(),
-                "name": info.name().unwrap_or(&filename),
-                "version": info.version().unwrap_or(""),
-                "icon": info.icon.as_ref().map(|icon| data_url(icon.extension, &icon.data)).unwrap_or_default(),
-                "error": "",
-            }),
+            Ok(info) => {
+                let integrated = items
+                    .iter()
+                    .find(|item| item.desktop_file.file_name().is_some_and(|name| name == info.desktop_file.as_str()));
+                replaces = integrated.is_some();
+                json!({
+                    "file": file.to_string_lossy(),
+                    "name": info.name().unwrap_or(&filename),
+                    "version": info.version().unwrap_or(""),
+                    "icon": info.icon.as_ref().map(|icon| data_url(icon.extension, &icon.data)).unwrap_or_default(),
+                    "error": "",
+                    "replaces": replaces,
+                    "integratedVersion": integrated.and_then(|item| item.version.as_deref()).unwrap_or(""),
+                })
+            }
             Err(error) => json!({
                 "file": file.to_string_lossy(),
                 "name": filename,
                 "version": "",
                 "icon": "",
                 "error": error.to_string(),
+                "replaces": false,
+                "integratedVersion": "",
             }),
         };
         self.as_mut().rust_mut().pending_file = Some(file);
+        self.as_mut().rust_mut().pending_replaces = replaces;
         self.set_pending(QString::from(&pending.to_string()));
     }
 

@@ -7,7 +7,7 @@ pub mod update;
 mod watch;
 
 pub use config::Dirs;
-pub use integrate::{Integrated, integrate, list, remove};
+pub use integrate::{Integrated, integrate, list, remove, replace};
 pub use watch::{Change, sync, watch};
 
 use std::fmt;

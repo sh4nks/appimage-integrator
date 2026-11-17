@@ -91,6 +91,13 @@ pub fn example(name: &str) -> PathBuf {
     })
 }
 
+pub fn example_version(name: &str, version: &str) -> PathBuf {
+    appimage(name, |squashfs| {
+        push_file(squashfs, "example.desktop", DESKTOP_ENTRY.replace("1.2.3", version).as_bytes());
+        push_file(squashfs, "example.png", PNG);
+    })
+}
+
 pub fn push_file(squashfs: &mut FilesystemWriter, path: &str, data: &[u8]) {
     squashfs.push_file(Cursor::new(data.to_vec()), path, NodeHeader::default()).unwrap();
 }

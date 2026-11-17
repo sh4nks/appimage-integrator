@@ -4,7 +4,7 @@ mod update;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use appimage_integrator_core::{Change, Dirs, Error, inspect, integrate, list, remove, sync, watch};
+use appimage_integrator_core::{Change, Dirs, Error, inspect, integrate, list, remove, replace, sync, watch};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -22,7 +22,12 @@ enum Command {
     /// Show the metadata embedded in an AppImage
     Info { file: PathBuf },
     /// Move an AppImage into the applications directory and add it to the launcher
-    Integrate { file: PathBuf },
+    Integrate {
+        file: PathBuf,
+        /// Take the place of an integrated version of the same app and delete its file
+        #[arg(long)]
+        replace: bool,
+    },
     /// List integrated AppImages
     List,
     /// Integrate new AppImages in the watched directories and drop entries for deleted ones
@@ -70,7 +75,9 @@ fn main() -> ExitCode {
     }
     let (subject, result) = match cli.command {
         Command::Info { file } => (file.display().to_string(), info(&file)),
-        Command::Integrate { file } => (file.display().to_string(), integrate_command(&file, &dirs)),
+        Command::Integrate { file, replace } => {
+            (file.display().to_string(), integrate_command(&file, replace, &dirs))
+        }
         Command::List => ("list".to_string(), list_command(&dirs)),
         Command::Sync => ("sync".to_string(), sync(&dirs, &mut print_change)),
         Command::Watch => ("watch".to_string(), watch(&dirs, &mut print_change)),
@@ -85,6 +92,9 @@ fn main() -> ExitCode {
     };
     if let Err(error) = result {
         eprintln!("{subject}: {error}");
+        if matches!(error, Error::AlreadyIntegrated(_)) {
+            eprintln!("Pass --replace to take the place of the integrated version and delete its file.");
+        }
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
@@ -108,8 +118,8 @@ fn info(file: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn integrate_command(file: &Path, dirs: &Dirs) -> Result<(), Error> {
-    let integrated = integrate(file, dirs)?;
+fn integrate_command(file: &Path, replace_existing: bool, dirs: &Dirs) -> Result<(), Error> {
+    let integrated = if replace_existing { replace(file, dirs)? } else { integrate(file, dirs)? };
     println!("Integrated {} as {}", integrated.name.as_deref().unwrap_or("-"), integrated.id);
     println!("AppImage:  {}", integrated.appimage.display());
     println!("Launcher:  {}", integrated.desktop_file.display());

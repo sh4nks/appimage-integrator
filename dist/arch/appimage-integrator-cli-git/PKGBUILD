@@ -11,6 +11,7 @@ optdepends=('libnotify: desktop notifications for available updates')
 provides=(appimage-integrator-cli)
 conflicts=(appimage-integrator-cli appimage-integrator)
 options=(!lto !debug)
+install=$pkgname.install
 source=("$pkgname::git+$url.git")
 sha256sums=(SKIP)
 

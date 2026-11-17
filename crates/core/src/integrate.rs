@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{Dirs, Error, desktop, inspect};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Integrated {
     pub id: String,
     pub name: Option<String>,
@@ -15,17 +15,34 @@ pub struct Integrated {
     pub icon: Option<PathBuf>,
 }
 
+enum Replace {
+    Nothing,
+    #[cfg(feature = "update")]
+    Id(String),
+    Existing,
+}
+
 pub fn integrate(file: &Path, dirs: &Dirs) -> Result<Integrated, Error> {
-    integrate_into(file, Some(&dirs.appimages), dirs, None)
+    Ok(integrate_into(file, Some(&dirs.appimages), dirs, Replace::Nothing)?.0)
+}
+
+pub fn replace(file: &Path, dirs: &Dirs) -> Result<Integrated, Error> {
+    let (new, old) = integrate_into(file, Some(&dirs.appimages), dirs, Replace::Existing)?;
+    if let Some(old) = old
+        && old.appimage != new.appimage
+    {
+        remove_if_present(&old.appimage)?;
+    }
+    Ok(new)
 }
 
 pub(crate) fn integrate_in_place(file: &Path, dirs: &Dirs) -> Result<Integrated, Error> {
-    integrate_into(file, None, dirs, None)
+    Ok(integrate_into(file, None, dirs, Replace::Nothing)?.0)
 }
 
 #[cfg(feature = "update")]
 pub(crate) fn replace_integration(old: &Integrated, file: &Path, dirs: &Dirs) -> Result<Integrated, Error> {
-    let new = integrate_into(file, None, dirs, Some(&old.id))?;
+    let (new, _) = integrate_into(file, None, dirs, Replace::Id(old.id.clone()))?;
     if new.id != old.id {
         fs::remove_file(&old.desktop_file)?;
     }
@@ -41,23 +58,32 @@ fn integrate_into(
     file: &Path,
     destination: Option<&Path>,
     dirs: &Dirs,
-    replacing: Option<&str>,
-) -> Result<Integrated, Error> {
+    replace: Replace,
+) -> Result<(Integrated, Option<Integrated>), Error> {
     let info = inspect(file)?;
+    let source = fs::canonicalize(file)?;
     let desktop_file = dirs.desktop_entries.join(&info.desktop_file);
     let id = entry_id(&desktop_file);
-    match fs::read_to_string(&desktop_file) {
-        Ok(existing) if parse(&desktop_file, &existing, dirs).is_some() => {
-            if replacing != Some(id.as_str()) {
-                return Err(Error::AlreadyIntegrated(id));
-            }
-        }
-        Ok(_) => return Err(Error::DesktopEntryConflict(desktop_file)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+    let previous = match fs::read_to_string(&desktop_file) {
+        Ok(existing) => match parse(&desktop_file, &existing, dirs) {
+            Some(previous) => Some(previous),
+            None => return Err(Error::DesktopEntryConflict(desktop_file)),
+        },
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
+    };
+    if let Some(previous) = &previous {
+        let replaceable = match replace {
+            Replace::Nothing => false,
+            #[cfg(feature = "update")]
+            Replace::Id(replaced) => replaced == id,
+            Replace::Existing => true,
+        };
+        if !replaceable && previous.appimage != source {
+            return Err(Error::AlreadyIntegrated(id));
+        }
     }
 
-    let source = fs::canonicalize(file)?;
     let appimage = match destination {
         Some(dir) => {
             fs::create_dir_all(dir)?;
@@ -66,7 +92,8 @@ fn integrate_into(
         None => source.clone(),
     };
     if source != appimage {
-        if appimage.exists() {
+        let takes_over_path = previous.as_ref().is_some_and(|previous| previous.appimage == appimage);
+        if appimage.exists() && !takes_over_path {
             return Err(Error::DestinationExists(appimage));
         }
         move_file(&source, &appimage)?;
@@ -84,6 +111,12 @@ fn integrate_into(
         }
         None => None,
     };
+    if let Some(previous) = &previous
+        && previous.icon != icon
+        && let Some(stale) = &previous.icon
+    {
+        remove_if_present(stale)?;
+    }
 
     let entry = desktop::rewrite(
         &info.desktop_entry,
@@ -93,7 +126,7 @@ fn integrate_into(
     fs::create_dir_all(&dirs.desktop_entries)?;
     fs::write(&desktop_file, &entry)?;
 
-    Ok(parse(&desktop_file, &entry, dirs).unwrap())
+    Ok((parse(&desktop_file, &entry, dirs).unwrap(), previous))
 }
 
 pub fn list(dirs: &Dirs) -> Result<Vec<Integrated>, Error> {
@@ -155,6 +188,8 @@ fn entry_id(desktop_file: &Path) -> String {
 fn move_file(from: &Path, to: &Path) -> io::Result<()> {
     match fs::rename(from, to) {
         Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
+            // a running AppImage keeps reading its old inode, so never write into it
+            remove_if_present(to)?;
             fs::copy(from, to)?;
             fs::remove_file(from)
         }

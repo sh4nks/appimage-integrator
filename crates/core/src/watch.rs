@@ -31,7 +31,7 @@ pub fn sync(dirs: &Dirs, report: &mut dyn FnMut(Change)) -> Result<(), Error> {
         }
         files.sort();
         for file in files {
-            integrate_new(&file, dirs, report)?;
+            integrate_file(&file, false, dirs, report)?;
         }
     }
     Ok(())
@@ -70,7 +70,7 @@ pub fn watch(dirs: &Dirs, report: &mut dyn FnMut(Change)) -> Result<(), Error> {
             }
             let file = dir.join(name);
             if event.mask.intersects(EventMask::CLOSE_WRITE | EventMask::MOVED_TO) {
-                integrate_new(&file, dirs, report)?;
+                integrate_file(&file, true, dirs, report)?;
             } else if remove_integration(&file, dirs, report)? {
                 sync(dirs, report)?;
             }
@@ -89,19 +89,28 @@ fn watched_dirs(dirs: &Dirs) -> io::Result<Vec<PathBuf>> {
     Ok(watched)
 }
 
-fn integrate_new(file: &Path, dirs: &Dirs, report: &mut dyn FnMut(Change)) -> Result<(), Error> {
+fn integrate_file(
+    file: &Path,
+    refresh: bool,
+    dirs: &Dirs,
+    report: &mut dyn FnMut(Change),
+) -> Result<(), Error> {
     let name = file.file_name().unwrap().to_string_lossy();
     if name.starts_with('.')
         || PARTIAL_DOWNLOAD_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
         || !matches!(appimage_type(file), Ok(Some(_)))
-        || list(dirs)?.iter().any(|item| item.appimage == file)
     {
         return Ok(());
     }
-    report(match integrate_in_place(file, dirs) {
-        Ok(integrated) => Change::Integrated(integrated),
-        Err(error) => Change::Failed(file.to_path_buf(), error),
-    });
+    let current = list(dirs)?.into_iter().find(|item| item.appimage == file);
+    if current.is_some() && !refresh {
+        return Ok(());
+    }
+    match integrate_in_place(file, dirs) {
+        Ok(integrated) if current.as_ref() == Some(&integrated) => {}
+        Ok(integrated) => report(Change::Integrated(integrated)),
+        Err(error) => report(Change::Failed(file.to_path_buf(), error)),
+    }
     Ok(())
 }
 

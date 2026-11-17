@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use appimage_integrator_core::{Change, Error, integrate, list, sync, watch};
-use common::{dirs, example};
+use common::{dirs, example, example_version};
 
 #[test]
 fn sync_integrates_new_files_and_drops_entries_for_deleted_ones() {
@@ -163,4 +163,28 @@ fn watch_reacts_to_files_appearing_and_disappearing() {
     fs::rename(&copied, dirs.appimages.join("Renamed.AppImage")).unwrap();
     assert!(matches!(next(), Change::Removed(_)));
     assert!(matches!(next(), Change::Integrated(item) if item.appimage.ends_with("Renamed.AppImage")));
+}
+
+#[test]
+fn watch_refreshes_the_entry_when_the_integrated_file_is_rewritten() {
+    let dirs = dirs("watch-rewrite-dirs");
+    fs::create_dir_all(&dirs.appimages).unwrap();
+    let appimage = dirs.appimages.join("Example.AppImage");
+    fs::rename(example("watch-rewrite.AppImage"), &appimage).unwrap();
+    let (sender, receiver) = mpsc::channel();
+    let watch_dirs = dirs.clone();
+    thread::spawn(move || {
+        watch(&watch_dirs, &mut |change| {
+            let _ = sender.send(change);
+        })
+    });
+    let next = || receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(next(), Change::Integrated(item) if item.version.as_deref() == Some("1.2.3")));
+
+    fs::rename(example_version("watch-rewrite-moved.AppImage", "2.0.0"), &appimage).unwrap();
+    assert!(matches!(next(), Change::Integrated(item) if item.version.as_deref() == Some("2.0.0")));
+
+    fs::copy(example_version("watch-rewrite-copied.AppImage", "3.0.0"), &appimage).unwrap();
+    assert!(matches!(next(), Change::Integrated(item) if item.version.as_deref() == Some("3.0.0")));
+    assert_eq!(list(&dirs).unwrap().len(), 1);
 }

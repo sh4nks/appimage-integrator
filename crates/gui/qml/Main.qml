@@ -75,9 +75,16 @@ ApplicationWindow {
                 Label {
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
-                    text: window.pending.error !== ""
-                        ? "This file cannot be integrated: " + window.pending.error + "."
-                        : "This AppImage is not in your launcher yet. Integrating moves it to your applications folder and adds a launcher entry."
+                    text: {
+                        if (window.pending.error !== "")
+                            return "This file cannot be integrated: " + window.pending.error + "."
+                        if (!window.pending.replaces)
+                            return "This AppImage is not in your launcher yet. Integrating moves it to your applications folder and adds a launcher entry."
+                        const integrated = window.pending.integratedVersion === ""
+                            ? "Another build of this app is"
+                            : "Version " + window.pending.integratedVersion + " of this app is"
+                        return integrated + " already in your launcher. Replacing it moves this file to your applications folder and deletes the old one."
+                    }
                 }
 
                 Label {
@@ -100,19 +107,23 @@ ApplicationWindow {
                     }
                     Button {
                         text: "Cancel"
+                        icon.name: "dialog-cancel"
                         onClicked: Qt.quit()
                     }
                     Button {
                         text: "Run once"
+                        icon.name: "media-playback-start"
                         onClicked: if (backend.runPending()) Qt.quit()
                     }
                     Button {
-                        text: "Integrate"
+                        text: window.pending.replaces ? "Replace" : "Integrate"
+                        icon.name: window.pending.replaces ? "exchange-positions" : "install"
                         enabled: window.pending.error === ""
                         onClicked: backend.integratePending(false)
                     }
                     Button {
-                        text: "Integrate and run"
+                        text: window.pending.replaces ? "Replace and run" : "Integrate and run"
+                        icon.name: "run-install"
                         highlighted: true
                         enabled: window.pending.error === ""
                         onClicked: if (backend.integratePending(true)) Qt.quit()
@@ -150,12 +161,14 @@ ApplicationWindow {
                     }
                     ToolButton {
                         text: "Check for updates"
+                        icon.name: "update-none"
                         visible: backend.updatable
                         enabled: !backend.busy && window.apps.length > 0
                         onClicked: backend.checkUpdates()
                     }
                     ToolButton {
                         text: "Refresh"
+                        icon.name: "view-refresh"
                         enabled: !backend.busy
                         onClicked: backend.refresh()
                     }
@@ -221,6 +234,7 @@ ApplicationWindow {
 
                         Button {
                             text: "Update"
+                            icon.name: "edit-download"
                             highlighted: true
                             visible: row.modelData.updateAvailable
                             enabled: !backend.busy
@@ -228,11 +242,13 @@ ApplicationWindow {
                         }
                         Button {
                             text: "Open"
+                            icon.name: "media-playback-start"
                             enabled: !row.modelData.missing
                             onClicked: backend.launchApp(row.modelData.id)
                         }
                         Button {
                             text: "Remove"
+                            icon.name: "edit-delete"
                             enabled: !backend.busy
                             onClicked: removeDialog.ask(row.modelData)
                         }
